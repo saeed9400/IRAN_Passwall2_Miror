@@ -1,0 +1,59 @@
+name: passwall2 ds2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup
+      run: |
+        sudo apt-get install -y wget unzip
+    
+    - name: Get version
+      run: |
+        URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases/latest"
+        VERSION=$(curl -s $URL | grep '"tag_name"' | cut -d'"' -f4)
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "Latest: $VERSION"
+    
+    - name: Create folder
+      run: |
+        mkdir -p "IR_Passwall2_M/$VERSION"
+    
+    - name: Download files
+      run: |
+        cd "IR_Passwall2_M/$VERSION"
+        
+        # دانلود ۶ فایل اصلی
+        wget https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/latest/download/luci-app-passwall2-$VERSION-r1.apk
+        wget https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/latest/download/luci-app-passwall2_$VERSION-r1_all.ipk
+        wget https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/latest/download/luci-i18n-passwall2-zh-cn-$VERSION.apk
+        wget https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/latest/download/luci-i18n-passwall2-zh-cn_$VERSION_all.ipk
+        wget https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/latest/download/luci-i18n-passwall2-zh-tw-$VERSION.apk
+        wget https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/latest/download/luci-i18n-passwall2-zh-tw_$VERSION_all.ipk
+        
+        # دانلود و اکسترکت یک زیپ نمونه (aarch64)
+        wget https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/latest/download/passwall_packages_apk_aarch64_cortex-a53.zip
+        mkdir -p aarch64/cortex-a53
+        unzip -q passwall_packages_apk_aarch64_cortex-a53.zip -d aarch64/cortex-a53
+        rm passwall_packages_apk_aarch64_cortex-a53.zip
+        
+        echo "Files downloaded!"
+    
+    - name: Commit
+      run: |
+        git config user.name "GitHub Action"
+        git config user.email "action@github.com"
+        git add .
+        git commit -m "📦 Add Passwall2 ${{ env.VERSION }}"
+        git push
