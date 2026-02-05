@@ -1,13 +1,9 @@
 <br>
 <p align="center">
 <h1>IRAN Passwall2 Mirror</h1> 
-<br>
-
-
-<h2>
-این مخزن، میرور از مخزن اصلی **PassWall2** می‌باشد...
-</h2>
+<h2>این مخزن، میرور از مخزن اصلی **PassWall2** می‌باشد...</h2>
 </p>
+<br>
 
 - **luci-app-passwall2**
 - VLESS | VMess | Trojan | Shadowsocks | Hysteria | Hysteria2  
