@@ -1,16 +1,11 @@
-name: IR_Passwall2_Index_1
+name: IR_Passwall2_Index
 
 on:
-  # بعد از هر push به main (به خصوص بعد از mirror)
   push:
     branches: [ main ]
     paths:
       - 'irpasswall2_repo/**'
-  
-  # یا به صورت دستی
   workflow_dispatch:
-  
-  # یا هر روز یک بار (برای اطمینان)
   schedule:
     - cron: '10 0 * * *'
 
@@ -24,7 +19,8 @@ jobs:
           fetch-depth: 0
 
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y coreutils libarchive-tools gzip
+        run: |
+          sudo apt-get update && sudo apt-get install -y coreutils libarchive-tools gzip
 
       - name: Generate Packages index
         run: |
@@ -32,55 +28,61 @@ jobs:
           PACKAGES_FILE="${BASE_DIR}/Packages"
           PACKAGES_GZ="${BASE_DIR}/Packages.gz"
 
-          echo "Building Packages index from all versions..."
+          echo "Building Packages index..."
 
-          # فقط آخرین نسخه رو ایندکس می‌کنیم (رفتار استاندارد)
-          LATEST_VERSION=$(ls -1vd ${BASE_DIR}/v* 2>/dev/null | head -n 1)
-          
+          # پیدا کردن آخرین نسخه (با یا بدون v)
+          LATEST_VERSION=$(ls -1vd ${BASE_DIR}/* 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$' | sort -V | tail -n 1)
+
           if [ -z "$LATEST_VERSION" ]; then
-            echo "No version folders found!"
+            echo "No version folders found in $BASE_DIR!"
             exit 1
           fi
 
-          PKG_DIR="${LATEST_VERSION}/packages"
-          echo "Using latest version: $(basename $LATEST_VERSION)"
+          PKG_DIR="${BASE_DIR}/${LATEST_VERSION}/packages"
+          echo "Using latest version: $LATEST_VERSION"
           echo "Scanning: $PKG_DIR"
+
+          if [ ! -d "$PKG_DIR" ]; then
+            echo "Package directory not found: $PKG_DIR"
+            exit 1
+          fi
 
           cd "$PKG_DIR" || exit 1
 
           rm -f "../../Packages" "../../Packages.gz" 2>/dev/null
           > "../../Packages"
 
-          # جمع‌آوری همه ipkها از همه معماری‌ها
+          # ایندکس کردن همه ipkها از همه معماری‌ها
           find . -name '*.ipk' -type f -print0 | sort -z | while IFS= read -r -d '' pkg; do
             filename="${pkg#./}"
             size=$(stat -c %s "$pkg" 2>/dev/null || echo 0)
-            md5=$(md5sum "$pkg" 2>/dev/null | cut -d' ' -f1 || echo "0"*32)
-            sha256=$(sha256sum "$pkg" 2>/dev/null | cut -d' ' -f1 || echo "0"*64)
+            md5=$(md5sum "$pkg" 2>/dev/null | cut -d' ' -f1 || echo "00000000000000000000000000000000")
+            sha256=$(sha256sum "$pkg" 2>/dev/null | cut -d' ' -f1 || echo "0000000000000000000000000000000000000000000000000000000000000000")
 
-            # استخراج control
             control=$(tar -xOf "$pkg" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control 2>/dev/null)
             if [ -z "$control" ]; then
               control=$(tar --wildcards -xOf "$pkg" '*control*' 2>/dev/null)
             fi
 
             if [ -n "$control" ]; then
-              echo "$control"
-              echo "Filename: $filename"
-              echo "Size: $size"
-              echo "MD5Sum: $md5"
-              echo "SHA256sum: $sha256"
-              echo ""
+              printf '%s\n' "$control"
+              printf 'Filename: %s\n' "$filename"
+              printf 'Size: %s\n' "$size"
+              printf 'MD5Sum: %s\n' "$md5"
+              printf 'SHA256sum: %s\n' "$sha256"
+              printf '\n'
+            else
+              echo "Warning: No control found in $filename" >&2
             fi
           done >> "../../Packages"
 
           if [ -s "../../Packages" ]; then
             gzip -9 -c "../../Packages" > "../../Packages.gz"
-            echo "✅ Packages and Packages.gz successfully created!"
+            echo "✅ Packages and Packages.gz created!"
             echo "Lines in Packages: $(wc -l < "../../Packages")"
             du -h "../../Packages" "../../Packages.gz"
           else
-            echo "❌ No valid ipk files found"
+            echo "❌ No valid ipk files or control extraction failed"
           fi
 
       - name: Commit index files if changed
@@ -96,3 +98,8 @@ jobs:
             git commit -m "Update Packages index (auto)"
             git push
           fi
+
+      - name: Debug final files
+        run: |
+          ls -lh irpasswall2_repo/Packages* || echo "No Packages files"
+          head -n 20 irpasswall2_repo/Packages || echo "(empty)"
