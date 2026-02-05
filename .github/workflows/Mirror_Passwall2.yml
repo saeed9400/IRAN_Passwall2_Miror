@@ -2,148 +2,132 @@ name: Mirror Passwall2
 
 on:
   schedule:
-    - cron: '30 4 * * *'
+    - cron: '0 5 * * *'
   workflow_dispatch:
 
 jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y jq unzip curl coreutils libarchive-tools gzip
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y jq unzip curl coreutils libarchive-tools gzip
 
-      - name: Fetch release metadata
+      - name: Get latest release
         run: |
           curl -sSf -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases/latest > rel.json
           
-          tag=$(jq -r .tag_name rel.json || echo "unknown")
-          echo "VERSION=$tag" >> $GITHUB_ENV
-          echo "VER_FOLDER=v$tag" >> $GITHUB_ENV
+          VERSION=$(jq -r .tag_name rel.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "VER_FOLDER=v$VERSION" >> $GITHUB_ENV
           echo "BASE_DIR=irpasswall2_repo" >> $GITHUB_ENV
 
-      - name: Prepare directory structure
+      - name: Clean old versions (keep last 2)
         run: |
           mkdir -p "${{ env.BASE_DIR }}"
-          # Clean old versions (only keep last 2)
-          cd "${{ env.BASE_DIR }}" || exit 1
-          ls -d v* 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | head -n -2 | xargs rm -rfv || true
-          cd - >/dev/null
+          cd "${{ env.BASE_DIR }}"
+          ls -d v* 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+' | sort -V | head -n -2 | xargs rm -rfv || true
+          cd -
 
       - name: Extract asset list
         run: |
           jq -r '
             .assets[]
             | select(.name | test("Source code"; "i") | not)
-            | [.name, .browser_download_url]
-            | @tsv
+            | [.name, .browser_download_url] | @tsv
           ' rel.json > assets_list.tsv
           
-          # برای debug: محتوای فایل را نشان بده
-          echo "Assets list created. Line count: $(wc -l < assets_list.tsv)"
-          head -n 10 assets_list.tsv || true
+          echo "Assets count: $(wc -l < assets_list.tsv)"
+          head -n 8 assets_list.tsv
 
-      - name: Download and organize files
+      - name: Download & organize
         run: |
-          BASE_DIR="${{ env.BASE_DIR }}"
-          VER_DIR="${BASE_DIR}/${{ env.VER_FOLDER }}"
-          PKG_DIR="${VER_DIR}/packages"
+          BASE="${{ env.BASE_DIR }}"
+          TARGET="${BASE}/${{ env.VER_FOLDER }}/packages"
+          mkdir -p "$TARGET"
           
-          mkdir -p "$PKG_DIR"
-          
-          cd "$PKG_DIR"
-          
-          while IFS=$'\t' read -r fname url; do
-            [ -z "$fname" ] && continue
+          while IFS=$'\t' read -r NAME URL; do
+            [ -z "$NAME" ] && continue
             
-            echo "Processing: $fname"
+            echo "→ $NAME"
             
-            if [[ "$fname" == *.zip ]]; then
-              # استخراج معماری از نام زیپ (apk یا ipk)
-              if [[ $fname =~ passwall_packages_(apk|ipk)_([a-zA-Z0-9_-]+)\.zip ]]; then
-                arch="${BASH_REMATCH[2]}"
-              else
-                arch="unknown_$(basename "$fname" .zip)"
-              fi
-              
-              mkdir -p "$arch"
-              
-              curl -L --fail -sS -o tmp.zip "$url" || { echo "curl failed for $fname"; continue; }
-              
-              unzip -q -o tmp.zip -d tmp_extract || { echo "unzip failed"; rm -f tmp.zip; continue; }
-              
-              # انتقال ipk و apk (حتی اگر نامشان all باشد)
-              find tmp_extract -type f \( -name "*.ipk" -o -name "*.apk" \) -exec mv -t "$arch" {} + 2>/dev/null || echo "No files moved from $fname"
-              
-              rm -rf tmp.zip tmp_extract
-            elif [[ "$fname" == *.ipk || "$fname" == *.apk ]]; then
+            if [[ "$NAME" == *.ipk || "$NAME" == *.apk ]]; then
               arch="all"
-              mkdir -p "$arch"
-              curl -L --fail -sS -o "$arch/$fname" "$url" || echo "Download failed: $fname"
+              if [[ "$NAME" =~ _([a-z0-9_-]+)\.(ipk|apk)$ ]]; then
+                arch="${BASH_REMATCH[1]}"
+              fi
+              mkdir -p "$TARGET/$arch"
+              curl -L --fail -sS -o "$TARGET/$arch/$NAME" "$URL" || echo "Failed: $NAME"
             fi
-          done < ../../assets_list.tsv   # ← از ریشه repo می‌خواند (نه از BASE)
+            
+            if [[ "$NAME" =~ passwall_packages_(apk|ipk)_(.+)\.zip ]]; then
+              pkg_type="${BASH_REMATCH[1]}"
+              arch_full="${BASH_REMATCH[2]}"
+              mkdir -p "$TARGET/$arch_full"
+              
+              curl -L --fail -sS -o temp.zip "$URL" || continue
+              unzip -q -o temp.zip -d temp_extract || { rm -f temp.zip; continue; }
+              
+              # انتقال همه فایل‌های ipk/apk به پوشه معماری
+              find temp_extract -type f \( -name '*.ipk' -o -name '*.apk' \) -exec mv {} "$TARGET/$arch_full/" \;
+              
+              rm -rf temp.zip temp_extract
+              echo "Extracted $NAME → $arch_full"
+            fi
+          done < assets_list.tsv
 
-      - name: Copy all to other arches
-        run: |
-          cd "${{ env.BASE_DIR }}/${{ env.VER_FOLDER }}/packages" || exit 1
-          
-          if [ -d all ] && ls all/*.ipk all/*.apk >/dev/null 2>&1; then
-            for arch in */ ; do
-              [ "$arch" = "all/" ] && continue
-              cp -f all/* "$arch" 2>/dev/null || true
+          # کپی all به همه معماری‌ها
+          cd "$TARGET" || exit 1
+          if [ -d all ] && ls all/*.{ipk,apk} >/dev/null 2>&1; then
+            for d in */ ; do
+              [[ $d == all/ ]] && continue
+              cp -f all/* "$d" 2>/dev/null
             done
           fi
 
-      - name: Generate opkg Packages index
+      - name: Generate Packages index
         run: |
           cd "${{ env.BASE_DIR }}/${{ env.VER_FOLDER }}/packages" || exit 1
           
           > "${{ env.BASE_DIR }}/Packages"
           
-          find . -type f -name '*.ipk' -print0 | sort -z | while IFS= read -r -d '' pkg; do
-            filename="${pkg#./}"
-            [ -z "$filename" ] && continue
+          find . -name '*.ipk' -print0 | sort -z | while IFS= read -r -d '' f; do
+            fn="${f#./}"
+            sz=$(stat -c %s "$f")
+            md5=$(md5sum "$f" | cut -d' ' -f1)
+            sha256=$(sha256sum "$f" | cut -d' ' -f1)
             
-            size=$(stat -c%s "$pkg" 2>/dev/null || echo 0)
-            md5=$(md5sum "$pkg" 2>/dev/null | cut -d' ' -f1 || echo "00000000000000000000000000000000")
-            sha256=$(sha256sum "$pkg" 2>/dev/null | cut -d' ' -f1 || echo "0000000000000000000000000000000000000000000000000000000000000000")
+            ctrl=$(tar -xOf "$f" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control 2>/dev/null)
+            [ -z "$ctrl" ] && ctrl=$(tar --wildcards -xOf "$f" '*control*' 2>/dev/null)
             
-            control=$( (tar -xOf "$pkg" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control) || \
-                       tar --wildcards -xOf "$pkg" '*control' 2>/dev/null || echo "" )
-            
-            if [ -n "$control" ]; then
-              echo "$control"
-              echo "Filename: $filename"
-              echo "Size: $size"
-              echo "MD5Sum: $md5"
-              echo "SHA256sum: $sha256"
-              echo ""
-            fi
+            echo "$ctrl"
+            echo "Filename: $fn"
+            echo "Size: $sz"
+            echo "MD5Sum: $md5"
+            echo "SHA256sum: $sha256"
+            echo ""
           done >> "${{ env.BASE_DIR }}/Packages"
           
           gzip -9 -c "${{ env.BASE_DIR }}/Packages" > "${{ env.BASE_DIR }}/Packages.gz"
 
-      - name: Debug - list structure
+      - name: Debug structure
         run: |
-          echo "Root files:"
-          ls -la | grep -v '^total'
-          echo -e "\nInside irpasswall2_repo:"
-          tree -L 3 "${{ env.BASE_DIR }}" || find "${{ env.BASE_DIR }}" -maxdepth 3 -print | sort
+          find "${{ env.BASE_DIR }}" -type f | sort
+          du -sh "${{ env.BASE_DIR }}"/* || true
 
-      - name: Commit changes
+      - name: Commit
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          
-          git add "${{ env.BASE_DIR }}" Packages* assets_list.tsv rel.json || true
-          
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Mirror update: ${{ env.VERSION }} (fixed paths)"
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add "${{ env.BASE_DIR }}" Packages* assets_list.tsv || true
+          if ! git diff --staged --quiet; then
+            git commit -m "Mirror ${{ env.VERSION }} - base folder"
             git push
           fi
