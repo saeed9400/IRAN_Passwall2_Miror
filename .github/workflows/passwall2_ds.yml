@@ -1,4 +1,4 @@
-name: Sync OpenWrt Passwall2 Repository
+name: passwall2 ds
 
 on:
   schedule:
