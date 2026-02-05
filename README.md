@@ -1,6 +1,4 @@
-<p align="center">
-  <h1>IRAN Passwall2 Mirror (در حال ساخت)</h1>
-</p>
+<h1 style="text-align: center;">IRAN Passwall2 Mirror (در حال ساخت)</h1>
 
 این مخزن، برای بسته‌های **Passwall2** (luci-app-passwall2 + وابستگی‌ها) است.
 
@@ -18,10 +16,13 @@
 
 1. فایل
 '''
-`/etc/opkg/customfeeds.conf`
+~/etc/opkg/customfeeds.conf
+'''
+
 را ویرایش کنید (با vi یا nano) و این خط را اضافه کنید
 '''
 src/gz passwall2 https://saeed9400.github.io/IRAN_Passwall2_Miror/passwall2
+'''
 
 
 
