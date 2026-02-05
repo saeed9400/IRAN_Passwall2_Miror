@@ -20,14 +20,11 @@ jobs:
       - name: Get latest release info
         id: get-release
         run: |
-          RELEASE_JSON=$(curl -s https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases/latest)
+          RELEASE_JSON=$(curl -s -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases/latest)
           
-          VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name')
+          VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name // "unknown"')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          
-          # فقط assetهایی که منبع کد نیستند
-          ASSETS=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | test("Source code") | not) | {name: .name, browser_download_url: .browser_download_url}')
-          echo "$ASSETS" > assets.json
 
       - name: Create version folder inside IR_Passwall2
         run: |
@@ -37,45 +34,48 @@ jobs:
         run: |
           TARGET_DIR="IR_Passwall2/${{ env.VERSION }}"
           
-          jq -c '.[]' assets.json | while read -r ASSET; do
-            NAME=$(echo "$ASSET" | jq -r '.name')
-            URL=$(echo "$ASSET" | jq -r '.browser_download_url')
+          # مستقیم assetها را پیمایش می‌کنیم (بهترین روش)
+          echo "$RELEASE_JSON" | jq -r --arg target "$TARGET_DIR" '
+            .assets[]
+            | select(.name | test("Source code|zipball|tarball") | not)
+            | {name: .name, url: .browser_download_url}
+            | @json
+          ' | while IFS= read -r ASSET_JSON; do
             
-            # فایل‌های apk و ipk → مستقیم در پوشه نسخه
+            if [ -z "$ASSET_JSON" ]; then continue; fi
+            
+            NAME=$(echo "$ASSET_JSON" | jq -r '.name')
+            URL=$(echo "$ASSET_JSON" | jq -r '.url')
+            
+            echo "Processing: $NAME"
+            
+            # apk و ipk → مستقیم در پوشه نسخه
             if [[ "$NAME" == *.apk || "$NAME" == *.ipk ]]; then
-              curl -L -o "$TARGET_DIR/$NAME" "$URL"
-              echo "Copied: $NAME → $TARGET_DIR/"
+              curl -L -o "$TARGET_DIR/$NAME" "$URL" || echo "Failed to download $NAME"
+              echo "Copied: $NAME"
             fi
             
-            # فایل‌های zip (پکیج‌ها) → استخراج و مرتب‌سازی در زیرپوشه معماری
+            # zipهای پکیج‌ها
             if [[ "$NAME" == passwall_packages_apk_*.zip ]]; then
-              # دانلود
-              curl -L -o temp.zip "$URL"
+              curl -L -o temp.zip "$URL" || { echo "Download failed: $NAME"; continue; }
               
-              # استخراج
-              unzip -o temp.zip -d temp_extract
+              unzip -o temp.zip -d temp_extract || { echo "Unzip failed: $NAME"; rm -f temp.zip; continue; }
               
-              # تشخیص معماری و زیرمعماری از نام فایل زیپ
+              # استخراج معماری و زیرمعماری
               # مثال: passwall_packages_apk_aarch64_cortex-a72.zip
-              ARCH=$(echo "$NAME" | sed -E 's/.*_apk_([^_]+)_?.*/\1/')
-              SUBARCH=$(echo "$NAME" | sed -E 's/.*_apk_[^_]+_([^.]+)\.zip/\1/' || echo "")
-              
-              # اگر زیرمعماری پیدا نشد → فقط معماری
-              if [[ "$SUBARCH" == "$NAME" || -z "$SUBARCH" ]]; then
-                DEST="$TARGET_DIR/$ARCH"
-              else
+              if [[ $NAME =~ passwall_packages_apk_([a-z0-9]+)_([a-z0-9.-]+)\.zip ]]; then
+                ARCH="${BASH_REMATCH[1]}"
+                SUBARCH="${BASH_REMATCH[2]}"
                 DEST="$TARGET_DIR/$ARCH/$SUBARCH"
+              else
+                DEST="$TARGET_DIR/unknown"
               fi
               
               mkdir -p "$DEST"
-              
-              # انتقال فایل‌های استخراج‌شده
               mv temp_extract/* "$DEST/" 2>/dev/null || true
               
-              # پاکسازی
               rm -rf temp_extract temp.zip
-              
-              echo "Extracted $NAME → $DEST/"
+              echo "Extracted $NAME → $DEST"
             fi
           done
 
@@ -87,8 +87,8 @@ jobs:
           git add IR_Passwall2/
           
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No changes detected"
           else
             git commit -m "Sync latest release: ${{ env.VERSION }}"
-            git push
+            git push || echo "Push failed (maybe no permission or branch protected)"
           fi
