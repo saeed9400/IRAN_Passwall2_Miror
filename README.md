@@ -19,14 +19,14 @@
 
 ### نحوه استفاده از این میرور در OpenWrt
 
- 1: فایل زیر را ویرایش کنید (با `vi` یا `nano`):
+1: فایل زیر را ویرایش کنید (با `vi` یا `nano`):
 
 <p>
     ```bash
     vi /etc/opkg/customfeeds.conf
 </p>
 
- 2: این آدرس را به آن اضافه کنید
+2: این آدرس را به آن اضافه کنید
 <p>
     ```bash
     src/gz passwall2 https://saeed9400.github.io/IRAN_Passwall2_Miror/passwall2
@@ -36,7 +36,7 @@
 
 
 
- 3: سپس دستورات زیر را اجرا کنید:
+3: سپس دستورات زیر را اجرا کنید:
 
     ```bash
     opkg update
