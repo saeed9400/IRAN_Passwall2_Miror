@@ -21,16 +21,16 @@
 
  1: فایل زیر را ویرایش کنید (با `vi` یا `nano`):
 
-<br>
+<p>
     ```bash
     vi /etc/opkg/customfeeds.conf
-<br>
+</p>
 
  2: این آدرس را به آن اضافه کنید
-<br>
+<p>
     ```bash
     src/gz passwall2 https://saeed9400.github.io/IRAN_Passwall2_Miror/passwall2
-<br>
+</p>
 
 
 
