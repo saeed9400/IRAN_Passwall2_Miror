@@ -28,25 +28,26 @@ jobs:
           PACKAGES_FILE="$(pwd)/${BASE_DIR}/Packages"
           PACKAGES_GZ="$(pwd)/${BASE_DIR}/Packages.gz"
 
-          echo "Building Packages index..."
+          echo "Building opkg index..."
 
-          # پیدا کردن آخرین نسخه (26.2.5-1 یا v...)
-          LATEST_VERSION=$(ls -1vd "${BASE_DIR}"/* 2>/dev/null | \
-                           grep -E '([0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?)$' | \
-                           sort -V | tail -n 1)
+          # فقط نام پوشه‌های نسخه را استخراج می‌کنیم
+          VERSION_FOLDERS=$(ls -1 "${BASE_DIR}" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$')
 
-          if [ -z "$LATEST_VERSION" ]; then
-            echo "❌ No version folders found!"
+          if [ -z "$VERSION_FOLDERS" ]; then
+            echo "❌ No version folders found in ${BASE_DIR}"
             ls -la "${BASE_DIR}" || echo "Directory empty"
             exit 1
           fi
 
+          # آخرین نسخه (جدیدترین با sort -V)
+          LATEST_VERSION=$(echo "$VERSION_FOLDERS" | sort -V | tail -n 1)
+
           PKG_DIR="${BASE_DIR}/${LATEST_VERSION}/packages"
-          echo "✅ Using: $(basename "$LATEST_VERSION")"
+          echo "✅ Latest version folder: $LATEST_VERSION"
           echo "Scanning: $PKG_DIR"
 
           if [ ! -d "$PKG_DIR" ]; then
-            echo "❌ No packages dir: $PKG_DIR"
+            echo "❌ Packages dir not found: $PKG_DIR"
             exit 1
           fi
 
@@ -78,11 +79,12 @@ jobs:
 
           if [ -s "$PACKAGES_FILE" ]; then
             gzip -9 -c "$PACKAGES_FILE" > "$PACKAGES_GZ"
-            echo "✅ Created:"
-            echo " - Packages: $(wc -l < "$PACKAGES_FILE") lines"
-            echo " - Packages.gz: $(du -h "$PACKAGES_GZ" | cut -f1)"
+            echo "✅ Success:"
+            echo " - Packages lines: $(wc -l < "$PACKAGES_FILE")"
+            echo " - Packages.gz size: $(du -h "$PACKAGES_GZ" | cut -f1)"
           else
-            echo "❌ No valid ipk or control failed"
+            echo "❌ No .ipk or control failed"
+            find . -name '*.ipk' || echo "No .ipk at all"
           fi
 
       - name: Commit index files if changed
@@ -93,14 +95,14 @@ jobs:
           git add irpasswall2_repo/Packages irpasswall2_repo/Packages.gz || true
           
           if git diff --staged --quiet; then
-            echo "No changes in index"
+            echo "No changes in index files"
           else
-            git commit -m "Update opkg index files (auto)"
+            git commit -m "Update opkg Packages index (auto)"
             git push
           fi
 
-      - name: Debug - final check
+      - name: Final debug
         run: |
-          echo "Index files:"
+          echo "Index files check:"
           ls -lh irpasswall2_repo/Packages* 2>/dev/null || echo "Not found"
-          head -n 20 irpasswall2_repo/Packages || echo "(empty)"
+          head -n 20 irpasswall2_repo/Packages 2>/dev/null || echo "(empty)"
