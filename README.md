@@ -37,7 +37,7 @@
     opkg update
     opkg install luci-app-passwall2
 
-نکات مهم
+### نکات مهم
 
 حتماً وابستگی‌های لازم (مثل kmod-tun، dnsmasq-full، iptables و ...) را نصب کنید...
 
