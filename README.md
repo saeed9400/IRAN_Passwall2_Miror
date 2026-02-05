@@ -6,7 +6,7 @@
 
 - **luci-app-passwall2**
 - VLESS | VMess | Trojan | Shadowsocks | Hysteria | Hysteria2  
-- TUIC | WireGuard | sing-box | Xray-core و ...
+- TUIC | WireGuard | sing-box | Xray-core ...
 
 ### هدف میرور
 راه حلی برای رفع محدودیت‌های کاربران ایرانی در دسترسی به فایل‌های مورد نیاز نصب passwall2 با سرعت و پایداری بیشتر.
