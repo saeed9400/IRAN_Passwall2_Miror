@@ -15,11 +15,13 @@
  
 
 1. فایل
+   
 ```bash
 ~/etc/opkg/customfeeds.conf
 
 
 را ویرایش کنید (با vi یا nano) و این خط را اضافه کنید
+
 ```bash
 src/gz passwall2 https://saeed9400.github.io/IRAN_Passwall2_Miror/passwall2
 
