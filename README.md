@@ -6,14 +6,20 @@ IRAN Passwall2 OPKG Mirror
 📥 نحوه نصب ساده
 
 فایل تنظیمات را ویرایش کنید:
+''''
 nano /etc/opkg/customfeeds.conf
+''''
 
 این خط را اضافه کنید:
+''''
 src/gz passwall2 https://saeed9400.github.io/IRAN_Passwall2_Miror/passwall2
+''''
 
 اجرای دستورات:
+''''
 opkg update
 opkg install luci-app-passwall2
+''''
 
 🏗️ معماری‌های پشتیبانی شده
 
