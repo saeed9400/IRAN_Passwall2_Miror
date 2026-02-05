@@ -1,11 +1,11 @@
 <p align="center">
-  <h1>میروری از مخزن رسمی passwall2 برای کاربران ایرانی</h1>
+ <h1>میروری از مخزن رسمی passwall2 برای کاربران ایرانی</h1>
+
+
+ - **luci-app-passwall2**
+ - VLESS | VMess | Trojan | Shadowsocks | Hysteria | Hysteria2  
+ - TUIC | WireGuard | sing-box | Xray-core ...
 </p>
-
-- **luci-app-passwall2**
-- VLESS | VMess | Trojan | Shadowsocks | Hysteria | Hysteria2  
-- TUIC | WireGuard | sing-box | Xray-core ...
-
 <hr style="border: 1px solid #ccc; margin: 40px 0;">
 <br>
 
