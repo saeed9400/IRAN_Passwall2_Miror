@@ -14,28 +14,28 @@
 
  
 
-1. فایل
+1. فایل پایین را ویرایش کنید (با vi یا nano): 
    
-```bash
-~/etc/opkg/customfeeds.conf
-''''
+    ```bash
+    ~/etc/opkg/customfeeds.conf
 
 
-را ویرایش کنید (با vi یا nano) و این خط را اضافه کنید.
+
+این خط را اضافه کنید.
 
 
-```bash
-src/gz passwall2 https://saeed9400.github.io/IRAN_Passwall2_Miror/passwall2
-'''
+    ```bash
+    src/gz passwall2 https://saeed9400.github.io/IRAN_Passwall2_Miror/passwall2
+
 
 
 
 
 4. سپس دستورات زیر را اجرا کنید:
 
-```bash
-opkg update
-opkg install luci-app-passwall2
+    ```bash
+    opkg update
+    opkg install luci-app-passwall2
 
 نکات مهم
 
