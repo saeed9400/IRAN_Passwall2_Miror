@@ -1,4 +1,4 @@
-<h1 style="text-align: center;">IRAN Passwall2 Mirror (در حال ساخت)</h1>
+<h1 style="text-align: center;">IRAN Passwall2 Mirror</h1>
 
 این مخزن، برای بسته‌های **Passwall2** (luci-app-passwall2 + وابستگی‌ها) است.
 
