@@ -1,0 +1,144 @@
+name: IR_Passwall2.3
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq unzip curl coreutils libarchive-tools gzip
+
+      - name: Get latest release tag (safe redirect method)
+        run: |
+          LATEST_TAG=$(curl -s -L -w "%{url_effective}" -o /dev/null https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/latest | sed 's|.*/||')
+          echo "VERSION=$LATEST_TAG" >> $GITHUB_ENV
+          echo "VER_FOLDER=v$LATEST_TAG" >> $GITHUB_ENV
+          echo "BASE_DIR=irpasswall2_repo" >> $GITHUB_ENV
+          echo "Latest version: $LATEST_TAG"
+
+      - name: Clean old versions (keep only last 2)
+        run: |
+          mkdir -p "${{ env.BASE_DIR }}"
+          cd "${{ env.BASE_DIR }}" || exit 1
+          ls -d v* 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+' | sort -V | head -n -2 | xargs rm -rfv || true
+          cd - || true
+
+      - name: Download and organize assets
+        run: |
+          TARGET_DIR="${{ env.BASE_DIR }}/${{ env.VER_FOLDER }}"
+          PKG_DIR="$TARGET_DIR/packages"
+          mkdir -p "$PKG_DIR"
+          echo "Target directory: $PKG_DIR"
+
+          # دانلود مستقیم assetها از release tag (بدون نیاز به API)
+          curl -s "https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/download/${{ env.VERSION }}" | grep -oP 'href="\K[^"]+\.(apk|ipk|zip)' | sed 's|^|https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/download/${{ env.VERSION }}/|' > assets_urls.txt
+
+          echo "Found assets count: $(wc -l < assets_urls.txt)"
+
+          while IFS= read -r URL; do
+            [ -z "$URL" ] && continue
+            NAME=$(basename "$URL")
+            echo "→ Processing: $NAME"
+
+            if [[ "$NAME" == *.apk || "$NAME" == *.ipk ]]; then
+              curl -L --fail -sS -o "$PKG_DIR/$NAME" "$URL" || echo "Download failed: $NAME"
+            fi
+
+            if [[ "$NAME" =~ passwall_packages_apk_(.+)\.zip ]]; then
+              arch_full="${BASH_REMATCH[1]}"
+              mkdir -p "$PKG_DIR/$arch_full"
+              curl -L --fail -sS -o temp.zip "$URL" || continue
+              unzip -o -q temp.zip -d temp_extract || { rm -f temp.zip; continue; }
+              mv temp_extract/* "$PKG_DIR/$arch_full/" 2>/dev/null || echo "Move issue for $NAME"
+              rm -rf temp.zip temp_extract
+              echo "Extracted to $arch_full"
+            fi
+
+            if [[ "$NAME" =~ passwall_packages_ipk_(.+)\.zip ]]; then
+              arch_full="${BASH_REMATCH[1]}"
+              mkdir -p "$PKG_DIR/$arch_full"
+              curl -L --fail -sS -o temp.zip "$URL" || continue
+              unzip -o -q temp.zip -d temp_extract || { rm -f temp.zip; continue; }
+              mv temp_extract/* "$PKG_DIR/$arch_full/" 2>/dev/null || echo "Move issue for $NAME"
+              rm -rf temp.zip temp_extract
+              echo "Extracted to $arch_full"
+            fi
+          done < assets_urls.txt
+
+          # کپی فایل‌های all به معماری‌ها اگر وجود داشت
+          if [ -d "$PKG_DIR/all" ] && ls "$PKG_DIR/all"/*.{ipk,apk} >/dev/null 2>&1; then
+            for d in "$PKG_DIR"/*/ ; do
+              [[ "$d" == "$PKG_DIR/all/" ]] && continue
+              cp -f "$PKG_DIR/all"/* "$d" 2>/dev/null
+            done
+          fi
+
+      - name: Generate Packages index (simple)
+        run: |
+          PKG_DIR="${{ env.BASE_DIR }}/${{ env.VER_FOLDER }}/packages"
+          PACKAGES_FILE="${{ env.BASE_DIR }}/Packages"
+
+          if [ ! -d "$PKG_DIR" ]; then
+            echo "No packages directory found - skipping index"
+            exit 0
+          fi
+
+          cd "$PKG_DIR" || exit 1
+
+          rm -f "../../Packages" "../../Packages.gz" 2>/dev/null
+          : > "../../Packages"
+
+          find . -name '*.ipk' -type f -print0 | sort -z | while IFS= read -r -d '' pkg; do
+            filename="${pkg#./}"
+            size=$(stat -c %s "$pkg" 2>/dev/null || echo 0)
+            md5=$(md5sum "$pkg" | cut -d ' ' -f1 2>/dev/null || echo "0"*32)
+            sha256=$(sha256sum "$pkg" | cut -d ' ' -f1 2>/dev/null || echo "0"*64)
+
+            control=$(tar -xOf "$pkg" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control 2>/dev/null)
+            if [ -z "$control" ]; then
+              control=$(tar --wildcards -xOf "$pkg" '*control*' 2>/dev/null)
+            fi
+
+            if [ -n "$control" ]; then
+              echo "$control"
+              echo "Filename: $filename"
+              echo "Size: $size"
+              echo "MD5Sum: $md5"
+              echo "SHA256sum: $sha256"
+              echo ""
+            fi
+          done >> "../../Packages"
+
+          if [ -s "../../Packages" ]; then
+            gzip -9 "../../Packages"
+          fi
+
+      - name: Show final structure (debug)
+        run: |
+          echo "Final structure:"
+          find "${{ env.BASE_DIR }}" -print | sort || echo "No files in ${{ env.BASE_DIR }}"
+          du -sh "${{ env.BASE_DIR }}"/* 2>/dev/null || true
+          ls -la "${{ env.BASE_DIR }}" || true
+
+      - name: Commit and push if changes
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          git add "${{ env.BASE_DIR }}" Packages* || true
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto mirror latest release: ${{ env.VERSION }}"
+            git push || echo "Push failed"
+          fi
