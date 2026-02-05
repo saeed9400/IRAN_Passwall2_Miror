@@ -1,0 +1,109 @@
+name: IR_Passwall2_Mirror_1
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq unzip curl coreutils libarchive-tools gzip
+
+      - name: Get latest release info
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          curl -s -H "Accept: application/vnd.github+json" \
+               -H "Authorization: Bearer $GH_TOKEN" \
+               https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases/latest > release.json
+         
+          VERSION=$(jq -r '.tag_name // "unknown"' release.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+         
+          ASSET_COUNT=$(jq '.assets | length' release.json)
+          echo "Found $ASSET_COUNT assets"
+
+      - name: Clean old versions (keep last 2)
+        run: |
+          mkdir -p "irpasswall2_repo"
+          cd "irpasswall2_repo" || exit 1
+          ls -d v* 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+' | sort -V | head -n -2 | xargs rm -rfv || true
+          cd -
+
+      - name: Create version folder
+        run: mkdir -p "irpasswall2_repo/${{ env.VERSION }}/packages"
+
+      - name: Download and organize assets
+        run: |
+          TARGET_DIR="irpasswall2_repo/${{ env.VERSION }}/packages"
+          echo "Target directory: $TARGET_DIR"
+         
+          jq -r '
+            .assets[]
+            | select(.name | test("Source code|zipball|tarball"; "i") | not)
+            | [.name, .browser_download_url] | @tsv
+          ' release.json > assets_list.txt
+         
+          echo "Assets list line count: $(wc -l < assets_list.txt)"
+          head -n 5 assets_list.txt || echo "(empty)"
+          tail -n 5 assets_list.txt || echo "(empty)"
+         
+          while IFS=$'\t' read -r NAME URL; do
+            [ -z "$NAME" ] && continue
+           
+            echo "→ Processing: $NAME"
+           
+            if [[ "$NAME" == *.apk || "$NAME" == *.ipk ]]; then
+              echo " → Downloading $NAME"
+              curl -L --fail -sS -o "$TARGET_DIR/$NAME" "$URL" && echo " OK" || echo " Download failed"
+            fi
+           
+            if [[ "$NAME" =~ passwall_packages_apk_(.+)\.zip ]]; then
+              ARCH="${BASH_REMATCH[1]}"
+              DEST="$TARGET_DIR/$ARCH"
+              mkdir -p "$DEST"
+              echo " → Downloading ZIP $NAME → $ARCH"
+              curl -L --fail -sS -o temp.zip "$URL" || { echo " Download failed"; continue; }
+              unzip -o -q temp.zip -d temp_extract || { echo " Unzip failed"; rm -f temp.zip; continue; }
+              mv temp_extract/* "$DEST/" 2>/dev/null && echo " Moved OK" || echo " Move issue"
+              rm -rf temp_extract temp.zip
+              echo " → Extracted to $DEST"
+            fi
+
+            if [[ "$NAME" =~ passwall_packages_ipk_(.+)\.zip ]]; then
+              ARCH="${BASH_REMATCH[1]}"
+              DEST="$TARGET_DIR/$ARCH"
+              mkdir -p "$DEST"
+              curl -L --fail -sS -o temp.zip "$URL" || continue
+              unzip -o -q temp.zip -d temp_extract || { rm -f temp.zip; continue; }
+              mv temp_extract/* "$DEST/" 2>/dev/null
+              rm -rf temp_extract temp.zip
+              echo " → Extracted IPK ZIP to $DEST"
+            fi
+          done < assets_list.txt
+
+      - name: Show final structure (debug)
+        run: |
+          echo "Final structure:"
+          find irpasswall2_repo -print | sort
+          du -sh irpasswall2_repo/* 2>/dev/null || true
+
+      - name: Commit and push if changes
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+         
+          git add irpasswall2_repo/
+         
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto mirror latest release: ${{ env.VERSION }}"
+            git push || echo "Push failed"
+          fi
