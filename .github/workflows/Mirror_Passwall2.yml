@@ -44,8 +44,8 @@ jobs:
             | [.name, .browser_download_url] | @tsv
           ' rel.json > assets_list.tsv
           
-          echo "Assets count: $(wc -l < assets_list.tsv)"
-          head -n 8 assets_list.tsv
+          echo "Assets count: $(wc -l < assets_list.tsv || echo '0')"
+          head -n 8 assets_list.tsv || true
 
       - name: Download & organize
         run: |
@@ -75,7 +75,6 @@ jobs:
               curl -L --fail -sS -o temp.zip "$URL" || continue
               unzip -q -o temp.zip -d temp_extract || { rm -f temp.zip; continue; }
               
-              # انتقال همه فایل‌های ipk/apk به پوشه معماری
               find temp_extract -type f \( -name '*.ipk' -o -name '*.apk' \) -exec mv {} "$TARGET/$arch_full/" \;
               
               rm -rf temp.zip temp_extract
@@ -83,7 +82,6 @@ jobs:
             fi
           done < assets_list.tsv
 
-          # کپی all به همه معماری‌ها
           cd "$TARGET" || exit 1
           if [ -d all ] && ls all/*.{ipk,apk} >/dev/null 2>&1; then
             for d in */ ; do
@@ -94,40 +92,66 @@ jobs:
 
       - name: Generate Packages index
         run: |
-          cd "${{ env.BASE_DIR }}/${{ env.VER_FOLDER }}/packages" || exit 1
+          PKG_DIR="${{ env.BASE_DIR }}/${{ env.VER_FOLDER }}/packages"
+          PACKAGES_FILE="${{ env.BASE_DIR }}/Packages"
           
-          > "${{ env.BASE_DIR }}/Packages"
+          cd "$PKG_DIR" || { echo "cd to $PKG_DIR failed"; exit 1; }
+          
+          # پاک کردن فایل قدیمی اگر وجود داشته باشد
+          rm -f "$PACKAGES_FILE" "$PACKAGES_FILE.gz" 2>/dev/null
+          
+          > "$PACKAGES_FILE"   # این خط در cd درست کار می‌کند چون PACKAGES_FILE مطلق است
           
           find . -name '*.ipk' -print0 | sort -z | while IFS= read -r -d '' f; do
             fn="${f#./}"
-            sz=$(stat -c %s "$f")
-            md5=$(md5sum "$f" | cut -d' ' -f1)
-            sha256=$(sha256sum "$f" | cut -d' ' -f1)
+            sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
+            md5=$(md5sum "$f" 2>/dev/null | cut -d' ' -f1 || echo "0"*32)
+            sha256=$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1 || echo "0"*64)
             
             ctrl=$(tar -xOf "$f" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control 2>/dev/null)
-            [ -z "$ctrl" ] && ctrl=$(tar --wildcards -xOf "$f" '*control*' 2>/dev/null)
+            if [ -z "$ctrl" ]; then
+              ctrl=$(tar -xOf "$f" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control.tar.gz 2>/dev/null)  # fallback
+            fi
+            if [ -z "$ctrl" ]; then
+              ctrl=$(tar --wildcards -xOf "$f" '*control*' 2>/dev/null)
+            fi
             
-            echo "$ctrl"
-            echo "Filename: $fn"
-            echo "Size: $sz"
-            echo "MD5Sum: $md5"
-            echo "SHA256sum: $sha256"
-            echo ""
-          done >> "${{ env.BASE_DIR }}/Packages"
+            if [ -n "$ctrl" ]; then
+              echo "$ctrl"
+              echo "Filename: $fn"
+              echo "Size: $sz"
+              echo "MD5Sum: $md5"
+              echo "SHA256sum: $sha256"
+              echo ""
+            else
+              echo "Warning: No control found in $fn" >&2
+            fi
+          done >> "$PACKAGES_FILE"
           
-          gzip -9 -c "${{ env.BASE_DIR }}/Packages" > "${{ env.BASE_DIR }}/Packages.gz"
+          if [ -s "$PACKAGES_FILE" ]; then
+            gzip -9 -c "$PACKAGES_FILE" > "$PACKAGES_FILE.gz"
+            echo "Packages generated: $(wc -l < "$PACKAGES_FILE") lines"
+          else
+            echo "No ipk files or control extraction failed → empty Packages"
+          fi
 
-      - name: Debug structure
+      - name: Debug final structure
         run: |
-          find "${{ env.BASE_DIR }}" -type f | sort
-          du -sh "${{ env.BASE_DIR }}"/* || true
+          echo "Root level files:"
+          ls -la | grep -v '^total' || true
+          echo -e "\nInside irpasswall2_repo:"
+          find irpasswall2_repo -maxdepth 3 -type f | sort || true
+          echo -e "\nPackages file exists? $( [ -f irpasswall2_repo/Packages ] && echo Yes || echo No )"
+          head -n 20 irpasswall2_repo/Packages || echo "(empty or not found)"
 
       - name: Commit
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-          git add "${{ env.BASE_DIR }}" Packages* assets_list.tsv || true
+          git add "${{ env.BASE_DIR }}" Packages* assets_list.tsv rel.json || true
           if ! git diff --staged --quiet; then
-            git commit -m "Mirror ${{ env.VERSION }} - base folder"
+            git commit -m "Mirror ${{ env.VERSION }} - fixed Packages path"
             git push
+          else
+            echo "No new changes"
           fi
