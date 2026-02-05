@@ -21,7 +21,7 @@ jobs:
       - name: Get latest passwall2 release
         id: release
         run: |
-          API="https://api.github.com/repos/xiaorouji/openwrt-passwall2/releases/latest"
+          API="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases/latest"
           curl -s $API > release.json
 
           TAG=$(jq -r .tag_name release.json)
