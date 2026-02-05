@@ -1,8 +1,9 @@
 <br>
-<p align="center"><h1>این مخزن، میروری از مخزن رسمی passwall2 می‌باشد</p>
+<p align="center"><h1>میروری از مخزن رسمی passwall2 برای کاربران ایرانی</p>
 <br>
-<hr style="border: 1px solid #ccc; margin: 40px 0;">
-- **luci-app-passwall2**
+<hr style="border: 1px solid #ccc; margin: 40px 0;"></h1>
+<br>
+ - **luci-app-passwall2**
 - VLESS | VMess | Trojan | Shadowsocks | Hysteria | Hysteria2  
 - TUIC | WireGuard | sing-box | Xray-core و ...
 
