@@ -1,0 +1,136 @@
+name: Mirror Passwall2
+
+on:
+  schedule:
+    - cron: '15 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  mirror-versioned:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y jq unzip curl coreutils findutils libarchive-tools gzip
+
+      - name: Get latest release tag
+        id: meta
+        run: |
+          curl -sSf -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases/latest > rel.json
+          
+          tag=$(jq -r .tag_name rel.json)
+          echo "VERSION=${tag}" >> $GITHUB_ENV
+          echo "VERSION_FOLDER=v${tag}" >> $GITHUB_ENV
+
+      - name: Clean old versions (keep only the newest 2)
+        run: |
+          # پیدا کردن همه پوشه‌های v* و مرتب‌سازی نسخه‌ای + نگه داشتن ۲ تای آخر
+          ls -d v* 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sort -V | head -n -2 | xargs rm -rf || true
+
+      - name: Create version folder and download assets
+        run: |
+          mkdir -p "${{ env.VERSION_FOLDER }}/packages"
+
+          # استخراج assetهای غیر Source code
+          jq -r '
+            .assets[]
+            | select(.name | test("Source code"; "i") | not)
+            | [.name, .browser_download_url]
+            | @tsv
+          ' rel.json > assets.tsv
+
+          cd "${{ env.VERSION_FOLDER }}/packages"
+
+          while IFS=$'\t' read -r fname url; do
+            echo "→ $fname"
+
+            case "$fname" in
+              *.zip)
+                if [[ $fname =~ passwall_packages_apk_([a-zA-Z0-9_-]+)\.zip ]]; then
+                  arch="${BASH_REMATCH[1]}"
+                  mkdir -p "${arch}"
+                  
+                  curl -sSL --fail -o tmp.zip "$url" || continue
+                  unzip -q -o tmp.zip -d tmpdir || { rm -f tmp.zip; continue; }
+                  
+                  # انتقال .ipk و .apk به پوشه معماری
+                  find tmpdir -type f \( -name "*.ipk" -o -name "*.apk" \) -exec mv {} "${arch}/" \;
+                  
+                  rm -rf tmp.zip tmpdir
+                fi
+                ;;
+
+              *.ipk|*.apk)
+                arch="all"
+                if [[ $fname =~ _([a-zA-Z0-9_-]+)\.(ipk|apk)$ ]]; then
+                  arch="${BASH_REMATCH[1]}"
+                fi
+                
+                mkdir -p "${arch}"
+                curl -sSL --fail -o "${arch}/${fname}" "$url"
+                ;;
+            esac
+          done < ../../assets.tsv
+
+          # کپی فایل‌های all به همه معماری‌ها (روش استاندارد)
+          if [ -d "all" ] && [ "$(ls -A all)" ]; then
+            for d in */ ; do
+              [[ $d == all/ ]] && continue
+              cp -pf all/* "$d" 2>/dev/null || true
+            done
+          fi
+
+      - name: Generate Packages & Packages.gz (فقط برای آخرین نسخه)
+        run: |
+          cd "${{ env.VERSION_FOLDER }}/packages" || exit 1
+          
+          > ../../Packages
+          
+          find . -type f -name "*.ipk" -print0 | sort -z | while IFS= read -r -d '' pkg; do
+            filename="${pkg#./}"
+            size=$(stat -c %s "$pkg")
+            md5=$(md5sum < "$pkg" | cut -d' ' -f1)
+            sha256=$(sha256sum < "$pkg" | cut -d' ' -f1)
+
+            control=$(tar --wildcards -xOf "$pkg" '*/control' 2>/dev/null || \
+                      tar -xOf "$pkg" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control 2>/dev/null)
+
+            if [[ -n "$control" ]]; then
+              printf '%s\n' "$control"
+              printf 'Filename: %s\n' "$filename"
+              printf 'Size: %s\n' "$size"
+              printf 'MD5Sum: %s\n' "$md5"
+              printf 'SHA256sum: %s\n' "$sha256"
+              printf '\n'
+            fi
+          done >> ../../Packages
+
+          gzip -9 -c ../../Packages > ../../Packages.gz
+
+      - name: Debug - show structure
+        run: |
+          echo "Current versions kept:"
+          ls -d v* 2>/dev/null || echo "(none)"
+          echo -e "\nLatest version content:"
+          find "${{ env.VERSION_FOLDER }}" -type f | sort
+
+      - name: Commit & push changes
+        run: |
+          git config user.name  "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          
+          git add . 2>/dev/null || true
+          
+          if git diff --staged --quiet; then
+            echo "No changes detected"
+          else
+            git commit -m "Update mirror - ${{ env.VERSION }} (keep last 2 versions)"
+            git push || echo "Push failed"
+          fi
