@@ -1,6 +1,6 @@
 <br>
 <p align="center">
-<h1>Passwall2 Offical Mirror - IRAN Passwall
+<h1>Passwall2 Offical Mirror - IRAN Passwall<br>
 این مخزن، میرور از مخزن اصلی پسوال جهت کاربران ایرانی می‌باشد...</h1>
 </p>
 <br>
