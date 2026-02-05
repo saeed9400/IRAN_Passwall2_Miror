@@ -1,0 +1,98 @@
+name: IR_Passwall2_Index_1
+
+on:
+  # بعد از هر push به main (به خصوص بعد از mirror)
+  push:
+    branches: [ main ]
+    paths:
+      - 'irpasswall2_repo/**'
+  
+  # یا به صورت دستی
+  workflow_dispatch:
+  
+  # یا هر روز یک بار (برای اطمینان)
+  schedule:
+    - cron: '10 0 * * *'
+
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y coreutils libarchive-tools gzip
+
+      - name: Generate Packages index
+        run: |
+          BASE_DIR="irpasswall2_repo"
+          PACKAGES_FILE="${BASE_DIR}/Packages"
+          PACKAGES_GZ="${BASE_DIR}/Packages.gz"
+
+          echo "Building Packages index from all versions..."
+
+          # فقط آخرین نسخه رو ایندکس می‌کنیم (رفتار استاندارد)
+          LATEST_VERSION=$(ls -1vd ${BASE_DIR}/v* 2>/dev/null | head -n 1)
+          
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "No version folders found!"
+            exit 1
+          fi
+
+          PKG_DIR="${LATEST_VERSION}/packages"
+          echo "Using latest version: $(basename $LATEST_VERSION)"
+          echo "Scanning: $PKG_DIR"
+
+          cd "$PKG_DIR" || exit 1
+
+          rm -f "../../Packages" "../../Packages.gz" 2>/dev/null
+          > "../../Packages"
+
+          # جمع‌آوری همه ipkها از همه معماری‌ها
+          find . -name '*.ipk' -type f -print0 | sort -z | while IFS= read -r -d '' pkg; do
+            filename="${pkg#./}"
+            size=$(stat -c %s "$pkg" 2>/dev/null || echo 0)
+            md5=$(md5sum "$pkg" 2>/dev/null | cut -d' ' -f1 || echo "0"*32)
+            sha256=$(sha256sum "$pkg" 2>/dev/null | cut -d' ' -f1 || echo "0"*64)
+
+            # استخراج control
+            control=$(tar -xOf "$pkg" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control 2>/dev/null)
+            if [ -z "$control" ]; then
+              control=$(tar --wildcards -xOf "$pkg" '*control*' 2>/dev/null)
+            fi
+
+            if [ -n "$control" ]; then
+              echo "$control"
+              echo "Filename: $filename"
+              echo "Size: $size"
+              echo "MD5Sum: $md5"
+              echo "SHA256sum: $sha256"
+              echo ""
+            fi
+          done >> "../../Packages"
+
+          if [ -s "../../Packages" ]; then
+            gzip -9 -c "../../Packages" > "../../Packages.gz"
+            echo "✅ Packages and Packages.gz successfully created!"
+            echo "Lines in Packages: $(wc -l < "../../Packages")"
+            du -h "../../Packages" "../../Packages.gz"
+          else
+            echo "❌ No valid ipk files found"
+          fi
+
+      - name: Commit index files if changed
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          git add irpasswall2_repo/Packages irpasswall2_repo/Packages.gz || true
+          
+          if git diff --staged --quiet; then
+            echo "No changes in index files"
+          else
+            git commit -m "Update Packages index (auto)"
+            git push
+          fi
