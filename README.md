@@ -1,9 +1,15 @@
 <br>
 <p align="center">
-IRAN Passwall2 Mirror 
+<h1>IRAN Passwall2 Mirror</h1> 
 <br>
-این مخزن، برای بسته‌های **Passwall2** (luci-app-passwall2 + وابستگی‌ها) است.
 
+
+<h2>
+این مخزن، میرور از مخزن اصلی **PassWall2** می‌باشد...
+</h2>
+</p>
+
+- **luci-app-passwall2**
 - VLESS | VMess | Trojan | Shadowsocks | Hysteria | Hysteria2  
 - TUIC | WireGuard | sing-box | Xray-core و ...
 
