@@ -18,8 +18,8 @@
 
 1. فایل زیر را ویرایش کنید (با `vi` یا `nano`):
 
-```bash
-vi /etc/opkg/customfeeds.conf
+    
+    vi /etc/opkg/customfeeds.conf
 
 
     
@@ -31,7 +31,7 @@ vi /etc/opkg/customfeeds.conf
 
 4. سپس دستورات زیر را اجرا کنید:
 
-    ```bash
+    
     opkg update
     opkg install luci-app-passwall2
 
