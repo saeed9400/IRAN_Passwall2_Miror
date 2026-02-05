@@ -1,0 +1,130 @@
+name: Mirror Passwall2
+
+on:
+  schedule:
+    - cron: '20 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install deps
+        run: sudo apt-get update -qq && sudo apt-get install -y jq unzip curl coreutils libarchive-tools gzip
+
+      - name: Get latest tag
+        run: |
+          curl -sSf -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases/latest > rel.json
+          
+          tag=$(jq -r .tag_name rel.json)
+          echo "VERSION=$tag" >> $GITHUB_ENV
+          echo "VER_FOLDER=v$tag" >> $GITHUB_ENV
+          echo "BASE=irpasswall2_repo" >> $GITHUB_ENV
+
+      - name: Prepare & clean old versions
+        run: |
+          mkdir -p "${{ env.BASE }}"
+          cd "${{ env.BASE }}"
+          ls -d v* 2>/dev/null | grep '^v[0-9]' | sort -V | head -n -2 | xargs rm -rf || true
+          cd -
+
+      - name: Download + extract to versioned arch folders
+        run: |
+          BASE="${{ env.BASE }}"
+          VER="${BASE}/${{ env.VER_FOLDER }}"
+          PKG="${VER}/packages"
+          mkdir -p "$PKG"
+          
+          jq -r '.assets[] | select(.name | test("Source code", "i") | not) | [.name, .browser_download_url] | @tsv' rel.json > "$BASE/assets.tsv"
+          
+          cd "$PKG"
+          
+          while IFS=$'\t' read -r name url; do
+            echo "→ $name"
+            
+            if [[ $name == *.zip ]]; then
+              # استخراج معماری از نام زیپ
+              if [[ $name =~ passwall_packages_(apk|ipk)_([a-zA-Z0-9_-]+)\.zip ]]; then
+                type="${BASH_REMATCH[1]}"
+                arch="${BASH_REMATCH[2]}"
+              else
+                arch="unknown"
+              fi
+              
+              mkdir -p "$arch"
+              curl -sSL --fail -o tmp.zip "$url" || continue
+              
+              unzip -q -o tmp.zip -d tmp_ || { rm tmp.zip; continue; }
+              
+              # انتقال همه ipk و apk به پوشه معماری (حتی اگر نامشان all باشد)
+              find tmp_ -type f \( -name '*.ipk' -o -name '*.apk' \) -exec mv -t "$arch" {} + 2>/dev/null
+              
+              rm -rf tmp.zip tmp_
+            elif [[ $name == *.ipk || $name == *.apk ]]; then
+              arch="all"
+              if [[ $name =~ _([a-zA-Z0-9_-]+)\.(ipk|apk)$ ]]; then
+                arch="${BASH_REMATCH[1]}"
+              fi
+              mkdir -p "$arch"
+              curl -sSL --fail -o "$arch/$name" "$url"
+            fi
+          done < "$BASE/assets.tsv"
+
+          # کپی محتوای all به همه معماری‌های دیگر (اگر all وجود داشته باشد)
+          if [ -d all ] && ls all/* >/dev/null 2>&1; then
+            for arch_dir in */; do
+              [ "$arch_dir" = "all/" ] && continue
+              cp -f all/* "$arch_dir" 2>/dev/null || true
+            done
+          fi
+
+      - name: Build Packages index (in BASE root)
+        run: |
+          cd "${{ env.BASE }}/${{ env.VER_FOLDER }}/packages" || exit 1
+          
+          > "../../Packages"
+          
+          # فقط ipkها ایندکس می‌شوند
+          find . -type f -name '*.ipk' -print0 | sort -z | xargs -0 -I {} bash -c '
+            pkg="{}"
+            filename="${pkg#./}"
+            size=$(stat -c %s "$pkg")
+            md5=$(md5sum "$pkg" | cut -d" " -f1)
+            sha256=$(sha256sum "$pkg" | cut -d" " -f1)
+            
+            control=$(tar -xOf "$pkg" ./control.tar.gz 2>/dev/null | zcat | tar -xOf - ./control 2>/dev/null ||
+                      tar --wildcards -xOf "$pkg" "*/control" 2>/dev/null)
+            
+            if [ -n "$control" ]; then
+              echo "$control"
+              echo "Filename: $filename"
+              echo "Size: $size"
+              echo "MD5Sum: $md5"
+              echo "SHA256sum: $sha256"
+              echo ""
+            fi
+          ' >> "../../Packages"
+          
+          gzip -9 -c "../../Packages" > "../../Packages.gz"
+
+      - name: Show final structure
+        run: |
+          echo "Root level:"
+          ls -la | grep -v '^total'
+          echo -e "\nInside irpasswall2_repo:"
+          find irpasswall2_repo -mindepth 1 -maxdepth 3 -type d | sort || true
+          echo -e "\nSome files example:"
+          find irpasswall2_repo -name '*.ipk' | head -n 8 || true
+
+      - name: Commit if changed
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add "${{ env.BASE }}" Packages* || true
+          git diff --staged --quiet || git commit -m "Mirror ${{ env.VERSION }} → base folder + arch fix"
+          git push || echo "Push skipped"
